@@ -23,6 +23,19 @@ const hideClipboardBtn = document.getElementById('hideClipboardBtn');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+  // Check if all required elements exist
+  const requiredElements = [
+    'startBtn', 'stopBtn', 'qrSection', 'clipboardSection', 
+    'clipboardText', 'qrcode', 'urlDisplay', 'statusDot', 
+    'statusText', 'errorMessage', 'copyUrlBtn', 'openWindowBtn',
+    'receiveBtn', 'sendBtn', 'hideQrBtn', 'hideClipboardBtn'
+  ];
+  
+  const missingElements = requiredElements.filter(id => !document.getElementById(id));
+  if (missingElements.length > 0) {
+    console.error('Missing required elements:', missingElements);
+  }
+  
   checkServerStatus();
   
   startBtn.addEventListener('click', startServer);
@@ -41,23 +54,40 @@ function connectNativeHost() {
     port.disconnect();
   }
   
-  port = chrome.runtime.connectNative('com.clipshare.host');
-  
-  port.onMessage.addListener((message) => {
-    console.log('Received from native:', message);
-    handleNativeMessage(message);
-  });
-  
-  port.onDisconnect.addListener(() => {
-    console.log('Native host disconnected');
-    if (chrome.runtime.lastError) {
-      showError('Native host error: ' + chrome.runtime.lastError.message);
-    }
-    serverRunning = false;
-    updateUI();
-  });
-  
-  return port;
+  try {
+    port = chrome.runtime.connectNative('com.clipshare.host');
+    
+    port.onMessage.addListener((message) => {
+      console.log('Received from native:', message);
+      handleNativeMessage(message);
+    });
+    
+    port.onDisconnect.addListener(() => {
+      console.log('Native host disconnected');
+      if (chrome.runtime.lastError) {
+        const errorMsg = chrome.runtime.lastError.message;
+        console.error('Native host error:', errorMsg);
+        
+        // Provide helpful error messages
+        if (errorMsg.includes('Specified native messaging host not found')) {
+          showError('Native host not installed. Please run install_windows.bat first.');
+        } else if (errorMsg.includes('Native host has exited')) {
+          showError('Native host crashed. Check if Python and dependencies are installed.');
+        } else {
+          showError('Native host error: ' + errorMsg);
+        }
+      }
+      serverRunning = false;
+      port = null;
+      updateUI();
+    });
+    
+    return port;
+  } catch (error) {
+    console.error('Failed to connect to native host:', error);
+    showError('Failed to connect to native host: ' + error.message);
+    throw error;
+  }
 }
 
 // Handle messages from native host
@@ -139,8 +169,15 @@ function updateUI() {
       }
     });
     
-    // Save state
-    chrome.storage.local.set({ serverRunning: true, serverUrl: serverUrl });
+    // Save state (with error handling)
+    chrome.storage.local.set({ 
+      serverRunning: true, 
+      serverUrl: serverUrl 
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage error:', chrome.runtime.lastError);
+      }
+    });
   } else {
     // Server is stopped
     startBtn.classList.remove('hidden');
@@ -153,8 +190,17 @@ function updateUI() {
     statusText.textContent = 'Offline';
     clipboardText.value = '';
     
-    // Clear state
-    chrome.storage.local.set({ serverRunning: false, serverUrl: '', qrVisible: true, clipboardVisible: true });
+    // Clear state (with error handling)
+    chrome.storage.local.set({ 
+      serverRunning: false, 
+      serverUrl: '', 
+      qrVisible: true, 
+      clipboardVisible: true 
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage error:', chrome.runtime.lastError);
+      }
+    });
   }
 }
 
@@ -162,6 +208,13 @@ function updateUI() {
 function generateQR(url) {
   qrcode.innerHTML = '';
   try {
+    // Check if QRCode library is loaded
+    if (typeof QRCode === 'undefined') {
+      console.error('QRCode library not loaded');
+      qrcode.innerHTML = '<div style="color: var(--text-secondary); padding: 20px;">QR library not loaded</div>';
+      return;
+    }
+    
     new QRCode(qrcode, {
       text: url,
       width: 160,
@@ -172,7 +225,7 @@ function generateQR(url) {
     });
   } catch (error) {
     console.error('QR generation error:', error);
-    qrcode.innerHTML = '<div style="color: var(--text-secondary);">QR failed</div>';
+    qrcode.innerHTML = '<div style="color: var(--text-secondary); padding: 20px;">QR generation failed</div>';
   }
 }
 
@@ -207,42 +260,93 @@ function openWindow() {
 
 // Receive clipboard from server
 async function receiveClipboard() {
-  if (!serverUrl) return;
-  
-  receiveBtn.disabled = true;
-  const originalText = receiveBtn.innerHTML;
-  receiveBtn.innerHTML = '<div class="spinner"></div><span>Receiving...</span>';
-  
-  try {
-    const response = await fetch(`${serverUrl}/api/get`);
-    if (response.ok) {
-      const data = await response.json();
-      clipboardText.value = data.content || '';
-      
-      // Also update system clipboard
-      await navigator.clipboard.writeText(data.content || '');
-      
-      receiveBtn.innerHTML = '<span>✅</span><span>Received!</span>';
-      setTimeout(() => {
-        receiveBtn.innerHTML = originalText;
-        receiveBtn.disabled = false;
-      }, 2000);
-    } else {
-      throw new Error('Failed to receive clipboard');
+    if (!serverUrl || !serverRunning) {
+        showError('Server is not running. Please start the server first.');
+        return;
     }
-  } catch (error) {
-    console.error('Receive error:', error);
-    receiveBtn.innerHTML = '<span>❌</span><span>Failed</span>';
-    setTimeout(() => {
-      receiveBtn.innerHTML = originalText;
-      receiveBtn.disabled = false;
-    }, 2000);
-  }
+
+    receiveBtn.disabled = true;
+    const originalText = receiveBtn.innerHTML;
+    receiveBtn.innerHTML = '<div class="spinner"></div><span>Receiving...</span>';
+
+    try {
+        // Validate server URL format
+        if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+            throw new Error('Invalid server URL');
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        let response;
+        try {
+            response = await fetch(`${serverUrl}/api/get`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                signal: controller.signal
+            });
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            throw fetchError;
+        }
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`Server returned error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.content !== undefined && data.content !== null) {
+            clipboardText.value = data.content || '';
+            
+            // Also update system clipboard
+            try {
+                await navigator.clipboard.writeText(data.content || '');
+            } catch (clipboardError) {
+                console.warn('Could not write to system clipboard:', clipboardError);
+                // Continue anyway since we updated the textarea
+            }
+            
+            receiveBtn.innerHTML = '<span>✅</span><span>Received!</span>';
+        } else {
+            throw new Error('No content received from server');
+        }
+    } catch (error) {
+        // Don't log fetch errors as they're expected when server is unreachable
+        if (!error.message.includes('Failed to fetch') && error.name !== 'AbortError') {
+            console.error('Receive error:', error);
+        }
+        
+        receiveBtn.innerHTML = '<span>❌</span><span>Failed</span>';
+        
+        if (error.name === 'AbortError') {
+            showError('Request timeout - server not responding');
+        } else if (error.message.includes('Failed to fetch')) {
+            showError('Cannot connect to server. Is it running?');
+            // Update server state since it's not reachable
+            serverRunning = false;
+            updateUI();
+        } else {
+            showError('Error: ' + error.message);
+        }
+    } finally {
+        setTimeout(() => {
+            receiveBtn.innerHTML = originalText;
+            receiveBtn.disabled = false;
+        }, 2000);
+    }
 }
 
 // Send clipboard to server
 async function sendClipboard() {
-  if (!serverUrl) return;
+  if (!serverUrl || !serverRunning) {
+    showError('Server is not running. Please start the server first.');
+    return;
+  }
   
   const content = clipboardText.value;
   if (!content) {
@@ -255,26 +359,62 @@ async function sendClipboard() {
   sendBtn.innerHTML = '<div class="spinner"></div><span>Sending...</span>';
   
   try {
-    const response = await fetch(`${serverUrl}/api/set`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ content: content })
-    });
+    // Validate server URL format
+    if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+      throw new Error('Invalid server URL');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
     
-    if (response.ok) {
+    let response;
+    try {
+      response = await fetch(`${serverUrl}/api/set`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ content: content }),
+        signal: controller.signal
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
+    }
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`Server returned error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (data.status === 'success') {
       sendBtn.innerHTML = '<span>✅</span><span>Sent!</span>';
-      setTimeout(() => {
-        sendBtn.innerHTML = originalText;
-        sendBtn.disabled = false;
-      }, 2000);
+      // Don't clear the text - user might want to send again
     } else {
-      throw new Error('Failed to send clipboard');
+      throw new Error(data.message || 'Failed to send clipboard');
     }
   } catch (error) {
-    console.error('Send error:', error);
+    // Don't log fetch errors as they're expected when server is unreachable
+    if (!error.message.includes('Failed to fetch') && error.name !== 'AbortError') {
+      console.error('Send error:', error);
+    }
+    
     sendBtn.innerHTML = '<span>❌</span><span>Failed</span>';
+    
+    if (error.name === 'AbortError') {
+      showError('Request timeout - server not responding');
+    } else if (error.message.includes('Failed to fetch')) {
+      showError('Cannot connect to server. Is it running?');
+      // Update server state since it's not reachable
+      serverRunning = false;
+      updateUI();
+    } else {
+      showError('Error: ' + error.message);
+    }
+  } finally {
     setTimeout(() => {
       sendBtn.innerHTML = originalText;
       sendBtn.disabled = false;
@@ -310,6 +450,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getClipboard') {
     navigator.clipboard.readText().then(text => {
       sendResponse({ content: text });
+    }).catch(error => {
+      console.error('Error reading clipboard:', error);
+      sendResponse({ content: '', error: error.message });
     });
     return true; // Keep channel open for async response
   }

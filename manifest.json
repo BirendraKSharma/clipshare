@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ClipShare",
-  "version": "2.0",
-  "description": "Share clipboard between PC and phone via local web server. No apps needed!",
+  "version": "1.0",
+  "description": "Share clipboard between devices",
   "permissions": [
-    "clipboardRead",
-    "clipboardWrite",
     "storage",
-    "nativeMessaging"
+    "nativeMessaging",
+    "clipboardWrite",
+    "clipboardRead"
   ],
   "action": {
     "default_popup": "popup.html",
