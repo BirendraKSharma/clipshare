@@ -4,7 +4,8 @@
 
 <div align="center">
 
-![ClipShare](icon.png)
+<br>
+<img src="icon.png" alt="ClipShare" width="96">
 
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?style=flat-square&logo=google-chrome&logoColor=white)](https://www.google.com/chrome/)
 [![Brave Browser](https://img.shields.io/badge/Brave-Compatible-FB542B?style=flat-square&logo=brave&logoColor=white)](https://brave.com/)
