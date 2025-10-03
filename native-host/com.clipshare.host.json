@@ -1,0 +1,9 @@
+{
+  "name": "com.clipshare.host",
+  "description": "ClipShare native messaging host",
+  "path": "D:\\programming\\project\\extension\\clipshare\\native-host\\clipshare_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://emdhpalgeomhnffgkocbllnnimhepigk/"
+  ]
+}
