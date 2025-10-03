@@ -31,11 +31,15 @@
 
 ## 📸 Screenshots
 
-### Extension Popup (Light Mode)
+### Extension Popup
 Modern glass effect design with quick clipboard controls and QR code.
+
+<img src="ss/clipshare (1).png" alt="ClipShare Extension Popup" width="400">
 
 ### Phone Interface
 Clean, responsive web interface that works on any smartphone browser.
+
+<img src="ss/clipshare (2).png" alt="ClipShare Phone Interface" width="400">
 
 ---
 
